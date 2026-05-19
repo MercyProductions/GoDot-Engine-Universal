@@ -1,0 +1,100 @@
+﻿#pragma once
+
+#include <Windows.h>
+#include <cstddef>
+#include <cstdint>
+
+#if defined(AEGIS_UNIVERSAL_EXPORTS)
+#define AEGIS_UNIVERSAL_API extern "C" __declspec(dllexport)
+#else
+#define AEGIS_UNIVERSAL_API extern "C" __declspec(dllimport)
+#endif
+
+enum AegisUniversalRuntimeFlags : std::uint32_t
+{
+    AegisUniversalRuntime_None = 0,
+    AegisUniversalRuntime_ProcessHintMatched = 1u << 0,
+    AegisUniversalRuntime_ModuleHintMatched = 1u << 1,
+    AegisUniversalRuntime_ExportHintMatched = 1u << 2,
+    AegisUniversalRuntime_EngineDetected = 1u << 3
+};
+
+enum AegisUniversalSignatureFlags : std::uint32_t
+{
+    AegisUniversalSignature_None = 0,
+    AegisUniversalSignature_Process = 1u << 0,
+    AegisUniversalSignature_Module = 1u << 1,
+    AegisUniversalSignature_Export = 1u << 2,
+    AegisUniversalSignature_Renderer = 1u << 3,
+    AegisUniversalSignature_Scripting = 1u << 4,
+    AegisUniversalSignature_Physics = 1u << 5,
+    AegisUniversalSignature_Core = 1u << 6
+};
+
+struct AegisUniversalSignature
+{
+    const wchar_t* processHint;
+    const wchar_t* moduleHint;
+    const char* exportName;
+    std::uint32_t flags;
+    const char* note;
+};
+
+struct AegisUniversalProfile
+{
+    const wchar_t* engineName;
+    const wchar_t* shortName;
+    const wchar_t* reportFileName;
+    const wchar_t* traceFileName;
+    const AegisUniversalSignature* signatures;
+    std::size_t signatureCount;
+};
+
+struct AegisUniversalRuntimeInfo
+{
+    wchar_t engineName[64];
+    wchar_t processName[MAX_PATH];
+    wchar_t processPath[MAX_PATH];
+    wchar_t detectedModule[MAX_PATH];
+    std::uint32_t moduleCount;
+    std::uint32_t matchedModuleCount;
+    std::uint32_t matchedExportCount;
+    std::uint32_t flags;
+};
+
+struct AegisUniversalModuleInfo
+{
+    wchar_t name[MAX_PATH];
+    wchar_t path[MAX_PATH];
+    std::uintptr_t baseAddress;
+    std::uint32_t imageSize;
+    std::uint32_t flags;
+};
+
+struct AegisUniversalExportInfo
+{
+    char exportName[128];
+    wchar_t moduleName[MAX_PATH];
+    wchar_t modulePath[MAX_PATH];
+    std::uintptr_t address;
+    std::uint32_t flags;
+};
+
+AEGIS_UNIVERSAL_API int AegisUniversal_Initialize();
+AEGIS_UNIVERSAL_API int AegisUniversal_Refresh();
+AEGIS_UNIVERSAL_API void AegisUniversal_Shutdown();
+AEGIS_UNIVERSAL_API int AegisUniversal_IsInitialized();
+AEGIS_UNIVERSAL_API int AegisUniversal_IsEngineDetected();
+AEGIS_UNIVERSAL_API int AegisUniversal_GetRuntimeInfo(AegisUniversalRuntimeInfo* outInfo);
+AEGIS_UNIVERSAL_API std::uint32_t AegisUniversal_GetModuleCount();
+AEGIS_UNIVERSAL_API int AegisUniversal_GetModuleInfo(std::uint32_t index, AegisUniversalModuleInfo* outInfo);
+AEGIS_UNIVERSAL_API std::uint32_t AegisUniversal_GetMatchedExportCount();
+AEGIS_UNIVERSAL_API int AegisUniversal_GetMatchedExportInfo(std::uint32_t index, AegisUniversalExportInfo* outInfo);
+AEGIS_UNIVERSAL_API void* AegisUniversal_GetExport(const wchar_t* moduleName, const char* exportName);
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteRuntimeReport(const wchar_t* reportPath);
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteModuleCsv(const wchar_t* csvPath);
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteMatchedExportsCsv(const wchar_t* csvPath);
+AEGIS_UNIVERSAL_API const char* AegisUniversal_GetBrandAsciiArt();
+AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetEngineName();
+AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetReportFileName();
+AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetTraceFileName();

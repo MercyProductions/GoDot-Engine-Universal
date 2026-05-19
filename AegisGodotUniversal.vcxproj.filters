@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Include"><UniqueIdentifier>{EE82532E-6CC7-4870-8528-E24532AC4D52}</UniqueIdentifier></Filter>
+    <Filter Include="Source"><UniqueIdentifier>{42296B59-37E1-4367-8BCC-C0CCACBC5E0A}</UniqueIdentifier></Filter>
+    <Filter Include="Shared Runtime"><UniqueIdentifier>{D4E41683-2F03-41DD-B5BA-BE167C0B47B6}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Include\AegisGodotUniversal.h"><Filter>Include</Filter></ClInclude>
+    <ClInclude Include="Source\AegisEngineProfile.generated.h"><Filter>Source</Filter></ClInclude>
+    <ClInclude Include="Common\AegisUniversalRuntime\Include\AegisUniversalRuntime.h"><Filter>Shared Runtime</Filter></ClInclude>
+    <ClInclude Include="Common\AegisUniversalRuntime\Source\AegisUniversalRuntimeInternal.h"><Filter>Shared Runtime</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\GodotAdapter.cpp"><Filter>Source</Filter></ClCompile>
+    <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalRuntime.cpp"><Filter>Shared Runtime</Filter></ClCompile>
+    <ClCompile Include="Common\AegisUniversalRuntime\Source\dllmain.cpp"><Filter>Shared Runtime</Filter></ClCompile>
+  </ItemGroup>
+</Project>
