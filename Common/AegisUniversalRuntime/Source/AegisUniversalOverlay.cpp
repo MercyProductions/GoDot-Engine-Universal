@@ -273,6 +273,7 @@ namespace
                 ImGui::Text("Hooks installed: %s", g_hooksInstalled.load() ? "yes" : "no");
                 ImGui::Text("Win32 backend: %s", g_win32Initialized ? "ready" : "waiting");
                 ImGui::Text("Renderer backend: %s", g_imguiRendererReady ? "ready" : "waiting");
+                ImGui::Text("Loaded SDK resolver exports: %u", AegisUniversal_GetLoadedSdkExportCount());
                 ImGui::EndTabItem();
             }
 

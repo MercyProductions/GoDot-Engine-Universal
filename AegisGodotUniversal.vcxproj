@@ -52,6 +52,7 @@
   <ItemGroup>
     <ClCompile Include="Source\GodotAdapter.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalRuntime.cpp" />
+    <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalSdk.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\dllmain.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalOverlay.cpp" />
     <ClCompile Include="Source\GodotOverlayMenu.cpp" />

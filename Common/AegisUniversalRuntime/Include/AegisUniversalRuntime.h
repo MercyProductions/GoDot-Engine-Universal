@@ -31,6 +31,14 @@ enum AegisUniversalSignatureFlags : std::uint32_t
     AegisUniversalSignature_Core = 1u << 6
 };
 
+enum AegisUniversalSdkSource : std::uint32_t
+{
+    AegisUniversalSdkSource_None = 0,
+    AegisUniversalSdkSource_LiveExport = 1u << 0,
+    AegisUniversalSdkSource_DumpedSdk = 1u << 1,
+    AegisUniversalSdkSource_ReloadedSdk = 1u << 2
+};
+
 struct AegisUniversalSignature
 {
     const wchar_t* processHint;
@@ -80,6 +88,31 @@ struct AegisUniversalExportInfo
     std::uint32_t flags;
 };
 
+struct AegisUniversalSdkExportInfo
+{
+    char exportName[160];
+    wchar_t moduleName[MAX_PATH];
+    wchar_t modulePath[MAX_PATH];
+    std::uintptr_t address;
+    std::uintptr_t rva;
+    std::uint32_t ordinal;
+    std::uint32_t flags;
+    std::uint32_t source;
+};
+
+struct AegisUniversalResolvedSymbol
+{
+    char exportName[160];
+    wchar_t moduleName[MAX_PATH];
+    wchar_t modulePath[MAX_PATH];
+    std::uintptr_t address;
+    std::uintptr_t rva;
+    std::uint32_t ordinal;
+    std::uint32_t flags;
+    std::uint32_t source;
+    std::int32_t loaded;
+};
+
 AEGIS_UNIVERSAL_API int AegisUniversal_Initialize();
 AEGIS_UNIVERSAL_API int AegisUniversal_Refresh();
 AEGIS_UNIVERSAL_API void AegisUniversal_Shutdown();
@@ -94,6 +127,14 @@ AEGIS_UNIVERSAL_API void* AegisUniversal_GetExport(const wchar_t* moduleName, co
 AEGIS_UNIVERSAL_API int AegisUniversal_WriteRuntimeReport(const wchar_t* reportPath);
 AEGIS_UNIVERSAL_API int AegisUniversal_WriteModuleCsv(const wchar_t* csvPath);
 AEGIS_UNIVERSAL_API int AegisUniversal_WriteMatchedExportsCsv(const wchar_t* csvPath);
+AEGIS_UNIVERSAL_API int AegisUniversal_DumpSdkJson(const wchar_t* sdkPath);
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteSdkHeader(const wchar_t* headerPath);
+AEGIS_UNIVERSAL_API int AegisUniversal_LoadSdkJson(const wchar_t* sdkPath);
+AEGIS_UNIVERSAL_API void AegisUniversal_ClearLoadedSdk();
+AEGIS_UNIVERSAL_API std::uint32_t AegisUniversal_GetLoadedSdkExportCount();
+AEGIS_UNIVERSAL_API int AegisUniversal_GetLoadedSdkExportInfo(std::uint32_t index, AegisUniversalSdkExportInfo* outInfo);
+AEGIS_UNIVERSAL_API int AegisUniversal_ResolveExport(const wchar_t* moduleName, const char* exportName, AegisUniversalResolvedSymbol* outSymbol);
+AEGIS_UNIVERSAL_API int AegisUniversal_ResolveRva(const wchar_t* moduleName, std::uintptr_t rva, AegisUniversalResolvedSymbol* outSymbol);
 AEGIS_UNIVERSAL_API const char* AegisUniversal_GetBrandAsciiArt();
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetEngineName();
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetReportFileName();

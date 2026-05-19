@@ -84,6 +84,22 @@ AegisGodot_LoadSnapshotJson(...);
 AegisGodot_PrintCurrentObjects();
 ```
 
+## SDK Dump / Reload / Resolver
+
+The shared runtime can now dump a structured SDK, reload it into DLL memory, and resolve symbols through either live exports or the reloaded SDK cache:
+
+```cpp
+AegisUniversal_DumpSdkJson(...);
+AegisUniversal_WriteSdkHeader(...);
+AegisUniversal_LoadSdkJson(...);
+AegisUniversal_GetLoadedSdkExportCount();
+AegisUniversal_GetLoadedSdkExportInfo(...);
+AegisUniversal_ResolveExport(...);
+AegisUniversal_ResolveRva(...);
+```
+
+On startup the DLL writes `_SDK.json` and `_SDK.h` beside the existing temp reports, then reloads the JSON into resolver memory. Runtime detection now filters the universal DLL itself out of module/export matching, so `AegisGodotUniversal.dll` cannot be counted as Godot evidence.
+
 ## Object Snapshot
 
 Each submitted object snapshot contains:

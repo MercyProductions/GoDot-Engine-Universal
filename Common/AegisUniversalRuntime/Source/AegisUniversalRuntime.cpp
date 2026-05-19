@@ -125,6 +125,28 @@ namespace
         return length == 0 ? std::wstring() : std::wstring(path, length);
     }
 
+    HMODULE CurrentRuntimeModule()
+    {
+        HMODULE module = nullptr;
+        ::GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&CurrentRuntimeModule),
+            &module);
+        return module;
+    }
+
+    std::wstring CurrentRuntimeModulePath(HMODULE module)
+    {
+        wchar_t path[MAX_PATH] = {};
+        const DWORD length = ::GetModuleFileNameW(module, path, MAX_PATH);
+        return length == 0 ? std::wstring() : std::wstring(path, length);
+    }
+
+    bool SamePathInsensitive(const std::wstring& left, const std::wstring& right)
+    {
+        return !left.empty() && !right.empty() && ToLower(left) == ToLower(right);
+    }
+
     std::wstring TempFilePath(const wchar_t* fileName)
     {
         wchar_t tempPath[MAX_PATH] = {};
@@ -155,6 +177,8 @@ namespace
     std::vector<ModuleRecord> EnumerateModules()
     {
         std::vector<ModuleRecord> modules;
+        const HMODULE runtimeModule = CurrentRuntimeModule();
+        const std::wstring runtimeModulePath = CurrentRuntimeModulePath(runtimeModule);
         const HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, ::GetCurrentProcessId());
         if (snapshot == INVALID_HANDLE_VALUE)
             return modules;
@@ -165,6 +189,12 @@ namespace
         {
             do
             {
+                if (entry.hModule == runtimeModule || SamePathInsensitive(entry.szExePath, runtimeModulePath))
+                {
+                    entry.dwSize = sizeof(entry);
+                    continue;
+                }
+
                 ModuleRecord record;
                 record.name = entry.szModule;
                 record.path = entry.szExePath;

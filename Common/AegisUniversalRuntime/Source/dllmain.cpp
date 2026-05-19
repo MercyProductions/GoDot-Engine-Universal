@@ -119,6 +119,22 @@ namespace
         AegisUniversal_WriteMatchedExportsCsv(exportsCsvPath.c_str());
         WriteStatusLine(L"[AegisUniversal] Matched exports CSV: " + exportsCsvPath);
 
+        const std::wstring sdkJsonPath = ProfileSiblingPath(L"_SDK.json");
+        if (AegisUniversal_DumpSdkJson(sdkJsonPath.c_str()))
+            WriteStatusLine(L"[AegisUniversal] SDK JSON: " + sdkJsonPath);
+
+        const std::wstring sdkHeaderPath = ProfileSiblingPath(L"_SDK.h");
+        if (AegisUniversal_WriteSdkHeader(sdkHeaderPath.c_str()))
+            WriteStatusLine(L"[AegisUniversal] SDK header: " + sdkHeaderPath);
+
+        if (AegisUniversal_LoadSdkJson(sdkJsonPath.c_str()))
+        {
+            std::wstringstream sdkLine;
+            sdkLine << L"[AegisUniversal] SDK reloaded into resolver memory: "
+                    << AegisUniversal_GetLoadedSdkExportCount() << L" exports";
+            WriteStatusLine(sdkLine.str());
+        }
+
         WriteStatusLine(L"[AegisUniversal] Trace: " + TempFilePath(AegisUniversal_GetTraceFileName()));
         return 0;
     }
