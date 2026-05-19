@@ -274,6 +274,18 @@ namespace
                 ImGui::Text("Win32 backend: %s", g_win32Initialized ? "ready" : "waiting");
                 ImGui::Text("Renderer backend: %s", g_imguiRendererReady ? "ready" : "waiting");
                 ImGui::Text("Loaded SDK resolver exports: %u", AegisUniversal_GetLoadedSdkExportCount());
+                AegisUniversalSdkValidationInfo validation = {};
+                if (AegisUniversal_ValidateLoadedSdk(&validation))
+                {
+                    ImGui::Separator();
+                    ImGui::Text("SDK validation: %s", validation.sdkLoaded ? "loaded" : "not loaded");
+                    ImGui::Text("Live %u | SDK-only %u | stale RVA %u | self refs %u",
+                        validation.liveResolvedCount,
+                        validation.sdkOnlyCount,
+                        validation.staleRvaCount,
+                        validation.selfReferenceCount);
+                    ImGui::TextWrapped("%ls", validation.details);
+                }
                 ImGui::EndTabItem();
             }
 

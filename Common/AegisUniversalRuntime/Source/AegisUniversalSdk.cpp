@@ -112,6 +112,30 @@ namespace
         return JsonEscape(NarrowWide(value));
     }
 
+    std::string CsvEscape(const std::string& value)
+    {
+        const bool needsQuotes = value.find_first_of(",\"\r\n") != std::string::npos;
+        if (!needsQuotes)
+            return value;
+
+        std::string escaped;
+        escaped.reserve(value.size() + 2);
+        escaped.push_back('"');
+        for (const char ch : value)
+        {
+            if (ch == '"')
+                escaped.push_back('"');
+            escaped.push_back(ch);
+        }
+        escaped.push_back('"');
+        return escaped;
+    }
+
+    std::string CsvEscapeWide(const std::wstring& value)
+    {
+        return CsvEscape(NarrowWide(value));
+    }
+
     bool ContainsInsensitive(const std::wstring& haystack, const std::wstring& needle)
     {
         return !needle.empty() && ToLower(haystack).find(ToLower(needle)) != std::wstring::npos;
@@ -525,6 +549,96 @@ namespace
         }
         return false;
     }
+
+    bool FindModuleForSdkRecord(const std::vector<AegisUniversalModuleInfo>& modules, const SdkExportRecord& record, AegisUniversalModuleInfo& outModule)
+    {
+        for (const AegisUniversalModuleInfo& module : modules)
+        {
+            if (EqualsInsensitive(module.name, record.moduleName) || EqualsInsensitive(module.path, record.modulePath))
+            {
+                outModule = module;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool LooksLikeSelfReference(const SdkExportRecord& record)
+    {
+        const std::wstring combined = ToLower(record.moduleName + L" " + record.modulePath);
+        return combined.find(L"aegis") != std::wstring::npos &&
+            combined.find(L"universal") != std::wstring::npos;
+    }
+
+    std::vector<SdkExportRecord> SnapshotSdkExports()
+    {
+        std::lock_guard lock(g_sdkMutex);
+        if (!g_loadedSdkExports.empty())
+            return g_loadedSdkExports;
+        return {};
+    }
+
+    AegisUniversalSdkValidationInfo BuildValidationInfo()
+    {
+        AegisUniversalSdkValidationInfo info = {};
+        info.size = sizeof(info);
+
+        std::vector<SdkExportRecord> loaded;
+        {
+            std::lock_guard lock(g_sdkMutex);
+            loaded = g_loadedSdkExports;
+        }
+
+        info.sdkLoaded = loaded.empty() ? 0 : 1;
+        info.loadedExportCount = static_cast<std::uint32_t>(loaded.size());
+
+        if (loaded.empty())
+        {
+            CopyWide(info.details, L"No SDK JSON has been loaded into resolver memory yet.");
+            return info;
+        }
+
+        const std::vector<AegisUniversalModuleInfo> modules = CurrentModules();
+        for (const SdkExportRecord& record : loaded)
+        {
+            if (LooksLikeSelfReference(record))
+                ++info.selfReferenceCount;
+
+            AegisUniversalModuleInfo module = {};
+            if (!FindModuleForSdkRecord(modules, record, module))
+            {
+                ++info.sdkOnlyCount;
+                continue;
+            }
+
+            ++info.moduleMatchedCount;
+            if (record.rva != 0 && record.rva < module.imageSize)
+            {
+                ++info.liveResolvedCount;
+                continue;
+            }
+
+            if (record.rva >= module.imageSize)
+                ++info.staleRvaCount;
+            else
+            {
+                AegisUniversalResolvedSymbol symbol = {};
+                if (TryLiveResolve(record.moduleName.c_str(), record.exportName.c_str(), symbol))
+                    ++info.liveResolvedCount;
+            }
+        }
+
+        std::wstringstream details;
+        details << L"Loaded " << info.loadedExportCount
+                << L" SDK exports; " << info.liveResolvedCount
+                << L" resolve against currently loaded modules, " << info.sdkOnlyCount
+                << L" are SDK-only, " << info.staleRvaCount
+                << L" have stale RVAs.";
+        if (info.selfReferenceCount)
+            details << L" Self references found: " << info.selfReferenceCount << L".";
+        CopyWide(info.details, details.str());
+        return info;
+    }
 }
 
 AEGIS_UNIVERSAL_API int AegisUniversal_DumpSdkJson(const wchar_t* sdkPath)
@@ -651,6 +765,44 @@ AEGIS_UNIVERSAL_API int AegisUniversal_WriteSdkHeader(const wchar_t* headerPath)
     return 1;
 }
 
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteSdkMapCsv(const wchar_t* csvPath)
+{
+    if (!csvPath || !csvPath[0])
+        return 0;
+    if (!IsRuntimeInitialized())
+        return 0;
+
+    std::vector<SdkExportRecord> records = SnapshotSdkExports();
+    if (records.empty())
+        records = BuildSdkExports();
+
+    const std::vector<AegisUniversalModuleInfo> modules = CurrentModules();
+    std::ofstream out(std::filesystem::path(csvPath), std::ios::binary | std::ios::trunc);
+    if (!out)
+        return 0;
+
+    out << "Module,Path,ExportName,Ordinal,RVA,Address,ResolvedAddress,Flags,Source,Loaded\n";
+    for (const SdkExportRecord& record : records)
+    {
+        AegisUniversalModuleInfo module = {};
+        const bool loaded = FindModuleForSdkRecord(modules, record, module);
+        const std::uintptr_t resolvedAddress =
+            loaded && record.rva != 0 && record.rva < module.imageSize ? module.baseAddress + record.rva : 0;
+
+        out << CsvEscapeWide(record.moduleName) << ","
+            << CsvEscapeWide(record.modulePath) << ","
+            << CsvEscape(record.exportName) << ","
+            << record.ordinal << ","
+            << PointerHex(record.rva) << ","
+            << PointerHex(record.address) << ","
+            << PointerHex(resolvedAddress) << ","
+            << FlagsHex(record.flags) << ","
+            << FlagsHex(record.source) << ","
+            << (loaded ? "true" : "false") << "\n";
+    }
+    return 1;
+}
+
 AEGIS_UNIVERSAL_API int AegisUniversal_LoadSdkJson(const wchar_t* sdkPath)
 {
     if (!sdkPath || !sdkPath[0])
@@ -759,6 +911,45 @@ AEGIS_UNIVERSAL_API int AegisUniversal_ResolveExport(const wchar_t* moduleName, 
         return 1;
     }
     return 0;
+}
+
+AEGIS_UNIVERSAL_API int AegisUniversal_ValidateLoadedSdk(AegisUniversalSdkValidationInfo* outInfo)
+{
+    if (!outInfo)
+        return 0;
+    if (!IsRuntimeInitialized())
+        return 0;
+
+    *outInfo = BuildValidationInfo();
+    return 1;
+}
+
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteSdkValidationJson(const wchar_t* jsonPath)
+{
+    if (!jsonPath || !jsonPath[0])
+        return 0;
+    if (!IsRuntimeInitialized())
+        return 0;
+
+    const AegisUniversalSdkValidationInfo info = BuildValidationInfo();
+    std::ofstream out(std::filesystem::path(jsonPath), std::ios::binary | std::ios::trunc);
+    if (!out)
+        return 0;
+
+    out << "{\n";
+    out << "  \"format\": \"AegisUniversalSdkValidation\",\n";
+    out << "  \"version\": 1,\n";
+    out << "  \"engine\": \"" << JsonEscapeWide(AegisUniversal_GetEngineName() ? AegisUniversal_GetEngineName() : L"") << "\",\n";
+    out << "  \"sdkLoaded\": " << (info.sdkLoaded ? "true" : "false") << ",\n";
+    out << "  \"loadedExportCount\": " << info.loadedExportCount << ",\n";
+    out << "  \"liveResolvedCount\": " << info.liveResolvedCount << ",\n";
+    out << "  \"sdkOnlyCount\": " << info.sdkOnlyCount << ",\n";
+    out << "  \"staleRvaCount\": " << info.staleRvaCount << ",\n";
+    out << "  \"selfReferenceCount\": " << info.selfReferenceCount << ",\n";
+    out << "  \"moduleMatchedCount\": " << info.moduleMatchedCount << ",\n";
+    out << "  \"details\": \"" << JsonEscapeWide(info.details) << "\"\n";
+    out << "}\n";
+    return 1;
 }
 
 AEGIS_UNIVERSAL_API int AegisUniversal_ResolveRva(const wchar_t* moduleName, std::uintptr_t rva, AegisUniversalResolvedSymbol* outSymbol)

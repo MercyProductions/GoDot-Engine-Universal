@@ -91,14 +91,19 @@ The shared runtime can now dump a structured SDK, reload it into DLL memory, and
 ```cpp
 AegisUniversal_DumpSdkJson(...);
 AegisUniversal_WriteSdkHeader(...);
+AegisUniversal_WriteSdkMapCsv(...);
 AegisUniversal_LoadSdkJson(...);
 AegisUniversal_GetLoadedSdkExportCount();
 AegisUniversal_GetLoadedSdkExportInfo(...);
 AegisUniversal_ResolveExport(...);
 AegisUniversal_ResolveRva(...);
+AegisUniversal_ValidateLoadedSdk(...);
+AegisUniversal_WriteSdkValidationJson(...);
 ```
 
-On startup the DLL writes `_SDK.json` and `_SDK.h` beside the existing temp reports, then reloads the JSON into resolver memory. Runtime detection now filters the universal DLL itself out of module/export matching, so `AegisGodotUniversal.dll` cannot be counted as Godot evidence.
+On startup the DLL writes `_SDK.json`, `_SDK.h`, `_SDKMap.csv`, and `_SDKValidation.json` beside the existing temp reports, then reloads the JSON into resolver memory. Runtime detection now filters the universal DLL itself out of module/export matching, so `AegisGodotUniversal.dll` cannot be counted as Godot evidence.
+
+The F4 Runtime tab shows loaded SDK export count, live-resolved count, SDK-only count, stale RVA count, and any self-reference count.
 
 ## Object Snapshot
 

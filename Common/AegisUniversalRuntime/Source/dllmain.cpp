@@ -135,6 +135,26 @@ namespace
             WriteStatusLine(sdkLine.str());
         }
 
+        const std::wstring sdkMapPath = ProfileSiblingPath(L"_SDKMap.csv");
+        if (AegisUniversal_WriteSdkMapCsv(sdkMapPath.c_str()))
+            WriteStatusLine(L"[AegisUniversal] SDK map CSV: " + sdkMapPath);
+
+        const std::wstring sdkValidationPath = ProfileSiblingPath(L"_SDKValidation.json");
+        if (AegisUniversal_WriteSdkValidationJson(sdkValidationPath.c_str()))
+        {
+            AegisUniversalSdkValidationInfo validation = {};
+            AegisUniversal_ValidateLoadedSdk(&validation);
+
+            std::wstringstream validationLine;
+            validationLine << L"[AegisUniversal] SDK validation: "
+                           << validation.liveResolvedCount << L" live | "
+                           << validation.sdkOnlyCount << L" sdk-only | "
+                           << validation.staleRvaCount << L" stale RVA | "
+                           << validation.selfReferenceCount << L" self references";
+            WriteStatusLine(validationLine.str());
+            WriteStatusLine(L"[AegisUniversal] SDK validation JSON: " + sdkValidationPath);
+        }
+
         WriteStatusLine(L"[AegisUniversal] Trace: " + TempFilePath(AegisUniversal_GetTraceFileName()));
         return 0;
     }

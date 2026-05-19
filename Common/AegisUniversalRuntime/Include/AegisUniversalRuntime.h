@@ -113,6 +113,19 @@ struct AegisUniversalResolvedSymbol
     std::int32_t loaded;
 };
 
+struct AegisUniversalSdkValidationInfo
+{
+    std::uint32_t size;
+    std::int32_t sdkLoaded;
+    std::uint32_t loadedExportCount;
+    std::uint32_t liveResolvedCount;
+    std::uint32_t sdkOnlyCount;
+    std::uint32_t staleRvaCount;
+    std::uint32_t selfReferenceCount;
+    std::uint32_t moduleMatchedCount;
+    wchar_t details[256];
+};
+
 AEGIS_UNIVERSAL_API int AegisUniversal_Initialize();
 AEGIS_UNIVERSAL_API int AegisUniversal_Refresh();
 AEGIS_UNIVERSAL_API void AegisUniversal_Shutdown();
@@ -129,12 +142,15 @@ AEGIS_UNIVERSAL_API int AegisUniversal_WriteModuleCsv(const wchar_t* csvPath);
 AEGIS_UNIVERSAL_API int AegisUniversal_WriteMatchedExportsCsv(const wchar_t* csvPath);
 AEGIS_UNIVERSAL_API int AegisUniversal_DumpSdkJson(const wchar_t* sdkPath);
 AEGIS_UNIVERSAL_API int AegisUniversal_WriteSdkHeader(const wchar_t* headerPath);
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteSdkMapCsv(const wchar_t* csvPath);
 AEGIS_UNIVERSAL_API int AegisUniversal_LoadSdkJson(const wchar_t* sdkPath);
 AEGIS_UNIVERSAL_API void AegisUniversal_ClearLoadedSdk();
 AEGIS_UNIVERSAL_API std::uint32_t AegisUniversal_GetLoadedSdkExportCount();
 AEGIS_UNIVERSAL_API int AegisUniversal_GetLoadedSdkExportInfo(std::uint32_t index, AegisUniversalSdkExportInfo* outInfo);
 AEGIS_UNIVERSAL_API int AegisUniversal_ResolveExport(const wchar_t* moduleName, const char* exportName, AegisUniversalResolvedSymbol* outSymbol);
 AEGIS_UNIVERSAL_API int AegisUniversal_ResolveRva(const wchar_t* moduleName, std::uintptr_t rva, AegisUniversalResolvedSymbol* outSymbol);
+AEGIS_UNIVERSAL_API int AegisUniversal_ValidateLoadedSdk(AegisUniversalSdkValidationInfo* outInfo);
+AEGIS_UNIVERSAL_API int AegisUniversal_WriteSdkValidationJson(const wchar_t* jsonPath);
 AEGIS_UNIVERSAL_API const char* AegisUniversal_GetBrandAsciiArt();
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetEngineName();
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetReportFileName();
