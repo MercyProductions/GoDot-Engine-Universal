@@ -1,4 +1,5 @@
 ﻿#include "AegisUniversalRuntime.h"
+#include "AegisUniversalOverlay.h"
 
 #include <Windows.h>
 
@@ -84,6 +85,11 @@ namespace
         if (info.detectedModule[0])
             WriteStatusLine(L"[AegisUniversal] Detected module: " + std::wstring(info.detectedModule));
 
+        const bool overlayStarted = AegisUniversalOverlay_Start() != 0;
+        WriteStatusLine(std::wstring(L"[AegisUniversal] Internal ImGui overlay: ") +
+            (overlayStarted ? L"started" : L"not started") +
+            L" | F4 toggles menu | D3D11/D3D9/OpenGL bridge auto-detect armed");
+
         const std::uint32_t exportCount = AegisUniversal_GetMatchedExportCount();
         const std::uint32_t maxConsoleExports = exportCount < 64 ? exportCount : 64;
         for (std::uint32_t index = 0; index < maxConsoleExports; ++index)
@@ -128,6 +134,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
+        AegisUniversalOverlay_Stop();
         AegisUniversal_Shutdown();
     }
 

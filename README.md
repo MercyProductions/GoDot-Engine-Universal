@@ -116,6 +116,18 @@ Unknown
 
 The backend is inferred from loaded modules such as `vulkan-1.dll`, `d3d12.dll`, `d3d11.dll`, `dxgi.dll`, and `opengl32.dll`.
 
+## Internal ImGui Overlay
+
+The DLL now owns an in-process ImGui diagnostics menu. On load it starts an internal render bridge and attempts backend setup in this order:
+
+```text
+Direct3D11 Present
+Direct3D9 EndScene
+OpenGL SwapBuffers
+```
+
+Press `F4` to show or hide the menu. The menu includes runtime status, renderer status, adapter capability checks, object/provider timing, and overlay toggles for boxes, corner boxes, filled boxes, lines, and labels. Vulkan and D3D12 are still detected and reported clearly, but this build does not render ImGui through those backends yet.
+
 ## Build
 
 This repository vendors the small shared Aegis runtime under:

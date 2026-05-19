@@ -25,10 +25,10 @@
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_WINDOWS;AEGIS_UNIVERSAL_EXPORTS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)Include;$(ProjectDir)Source;$(ProjectDir)Common\AegisUniversalRuntime\Include;$(ProjectDir)Common\AegisUniversalRuntime\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Include;$(ProjectDir)Source;$(ProjectDir)ThirdParty\imgui;$(ProjectDir)ThirdParty\imgui\backends;$(ProjectDir)ThirdParty\kiero;$(ProjectDir)ThirdParty\kiero\minhook\include;$(ProjectDir)ThirdParty\kiero\minhook\src;$(ProjectDir)ThirdParty\kiero\minhook\src\hde;$(ProjectDir)Common\AegisUniversalRuntime\Include;$(ProjectDir)Common\AegisUniversalRuntime\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
-    <Link><SubSystem>Windows</SubSystem></Link>
+    <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>d3d9.lib;d3d11.lib;dxgi.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -37,21 +37,38 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;AEGIS_UNIVERSAL_EXPORTS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)Include;$(ProjectDir)Source;$(ProjectDir)Common\AegisUniversalRuntime\Include;$(ProjectDir)Common\AegisUniversalRuntime\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Include;$(ProjectDir)Source;$(ProjectDir)ThirdParty\imgui;$(ProjectDir)ThirdParty\imgui\backends;$(ProjectDir)ThirdParty\kiero;$(ProjectDir)ThirdParty\kiero\minhook\include;$(ProjectDir)ThirdParty\kiero\minhook\src;$(ProjectDir)ThirdParty\kiero\minhook\src\hde;$(ProjectDir)Common\AegisUniversalRuntime\Include;$(ProjectDir)Common\AegisUniversalRuntime\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
-    <Link><SubSystem>Windows</SubSystem><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences></Link>
+    <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>d3d9.lib;d3d11.lib;dxgi.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences></Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Include\AegisGodotUniversal.h" />
     <ClInclude Include="Source\AegisEngineProfile.generated.h" />
     <ClInclude Include="Common\AegisUniversalRuntime\Include\AegisUniversalRuntime.h" />
     <ClInclude Include="Common\AegisUniversalRuntime\Source\AegisUniversalRuntimeInternal.h" />
+    <ClInclude Include="Common\AegisUniversalRuntime\Include\AegisUniversalOverlay.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\GodotAdapter.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalRuntime.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\dllmain.cpp" />
+    <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalOverlay.cpp" />
+    <ClCompile Include="Source\GodotOverlayMenu.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui_draw.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui_tables.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="ThirdParty\imgui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="ThirdParty\imgui\backends\imgui_impl_dx9.cpp" />
+    <ClCompile Include="ThirdParty\imgui\backends\imgui_impl_dx11.cpp" />
+    <ClCompile Include="ThirdParty\imgui\backends\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="ThirdParty\kiero\kiero.cpp" />
+    <ClCompile Include="ThirdParty\kiero\minhook\src\buffer.c" />
+    <ClCompile Include="ThirdParty\kiero\minhook\src\hook.c" />
+    <ClCompile Include="ThirdParty\kiero\minhook\src\trampoline.c" />
+    <ClCompile Include="ThirdParty\kiero\minhook\src\hde\hde32.c" />
+    <ClCompile Include="ThirdParty\kiero\minhook\src\hde\hde64.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
