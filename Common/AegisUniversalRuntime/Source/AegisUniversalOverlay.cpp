@@ -3,18 +3,24 @@
 #endif
 
 #include "AegisUniversalOverlay.h"
+#include "AegisUniversalRuntime.h"
 
 #include <Windows.h>
 #include <d3d9.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <dwmapi.h>
+
+#pragma comment(lib, "dwmapi.lib")
 
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "MinHook.h"
 #include "imgui.h"
@@ -49,8 +55,25 @@ namespace
         None,
         D3D9,
         D3D11,
-        OpenGL
+        OpenGL,
+        StandaloneD3D11
     };
+
+    void OverlayLog(const char* msg)
+    {
+        if (!msg)
+            return;
+        AegisUniversal_LogPrintfA("[AegisOverlay] %s", msg);
+    }
+
+    void OverlayLogW(const wchar_t* msg)
+    {
+        if (!msg)
+            return;
+        std::wstring line = L"[AegisOverlay] ";
+        line += msg;
+        AegisUniversal_LogW(line.c_str());
+    }
 
     std::mutex g_stateMutex;
     std::atomic<bool> g_running{false};
@@ -72,6 +95,16 @@ namespace
     std::uint32_t g_backbufferWidth = 0;
     std::uint32_t g_backbufferHeight = 0;
     std::uint32_t g_backbufferFormat = 0;
+
+    // Standalone overlay window state
+    HWND g_overlayHwnd = nullptr;
+    HWND g_targetHwnd = nullptr;
+    IDXGISwapChain* g_standaloneSwapChain = nullptr;
+    ID3D11Device* g_standaloneDevice = nullptr;
+    ID3D11DeviceContext* g_standaloneContext = nullptr;
+    ID3D11RenderTargetView* g_standaloneRenderTarget = nullptr;
+    std::atomic<bool> g_standaloneRunning{false};
+    HANDLE g_standaloneThread = nullptr;
 
     D3D11PresentFn g_originalD3D11Present = nullptr;
     D3D11ResizeBuffersFn g_originalD3D11ResizeBuffers = nullptr;
@@ -136,6 +169,8 @@ namespace
             return L"Direct3D11";
         case ActiveBackend::OpenGL:
             return L"OpenGL";
+        case ActiveBackend::StandaloneD3D11:
+            return L"Standalone D3D11 Overlay";
         default:
             return L"None";
         }
@@ -170,12 +205,6 @@ namespace
 
     LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
-        if (msg == WM_KEYUP && wParam == VK_F4)
-        {
-            AegisUniversalOverlay_ToggleMenu();
-            return 0;
-        }
-
         if (g_menuVisible.load() && g_imguiContextReady)
         {
             if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
@@ -585,28 +614,446 @@ namespace
         return true;
     }
 
+    // ============================================================
+    // Standalone D3D11 Overlay Window (Vulkan/D3D12 fallback)
+    // ============================================================
+
+    HWND FindGameWindow()
+    {
+        struct EnumData
+        {
+            DWORD pid;
+            HWND result;
+            int bestArea;
+        };
+        EnumData data = { ::GetCurrentProcessId(), nullptr, 0 };
+        ::EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+            auto* d = reinterpret_cast<EnumData*>(lParam);
+            DWORD pid = 0;
+            ::GetWindowThreadProcessId(hwnd, &pid);
+            if (pid != d->pid || !::IsWindowVisible(hwnd))
+                return TRUE;
+
+            wchar_t title[256] = {};
+            ::GetWindowTextW(hwnd, title, 256);
+
+            // Skip our own console and overlay windows
+            if (wcsstr(title, L"Aegis") != nullptr)
+                return TRUE;
+
+            wchar_t className[256] = {};
+            ::GetClassNameW(hwnd, className, 256);
+            if (wcscmp(className, L"AegisOverlayClass") == 0)
+                return TRUE;
+            if (wcscmp(className, L"ConsoleWindowClass") == 0)
+                return TRUE;
+
+            // Must have a reasonable client area
+            RECT rect = {};
+            ::GetClientRect(hwnd, &rect);
+            int area = (rect.right - rect.left) * (rect.bottom - rect.top);
+            if (area > d->bestArea)
+            {
+                d->bestArea = area;
+                d->result = hwnd;
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&data));
+        return data.result;
+    }
+
+    LRESULT CALLBACK StandaloneOverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+    {
+        if (g_menuVisible.load() && g_imguiContextReady)
+        {
+            if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+                return 1;
+        }
+
+        if (msg == WM_DESTROY)
+        {
+            g_standaloneRunning.store(false);
+            return 0;
+        }
+
+        return ::DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    bool CreateStandaloneOverlayWindow(HWND targetHwnd)
+    {
+        RECT targetRect = {};
+        ::GetWindowRect(targetHwnd, &targetRect);
+        const int width = targetRect.right - targetRect.left;
+        const int height = targetRect.bottom - targetRect.top;
+
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.style = CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc = StandaloneOverlayWndProc;
+        wc.hInstance = ::GetModuleHandleW(nullptr);
+        wc.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = L"AegisOverlayClass";
+        ::RegisterClassExW(&wc);
+
+        g_overlayHwnd = ::CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT,
+            L"AegisOverlayClass",
+            L"Aegis Overlay",
+            WS_POPUP,
+            targetRect.left, targetRect.top, width, height,
+            nullptr, nullptr, wc.hInstance, nullptr);
+
+        if (!g_overlayHwnd)
+        {
+            OverlayLog("Failed to create overlay window");
+            return false;
+        }
+
+        // Make window click-through by default, remove WS_EX_TRANSPARENT when menu is visible
+        ::SetLayeredWindowAttributes(g_overlayHwnd, RGB(0, 0, 0), 255, LWA_ALPHA);
+
+        // Enable DWM transparency
+        MARGINS margins = { -1 };
+        ::DwmExtendFrameIntoClientArea(g_overlayHwnd, &margins);
+
+        ::ShowWindow(g_overlayHwnd, SW_SHOWNOACTIVATE);
+        OverlayLog("Standalone overlay window created");
+        return true;
+    }
+
+    bool CreateStandaloneD3D11()
+    {
+        RECT rect = {};
+        ::GetClientRect(g_overlayHwnd, &rect);
+        const UINT width = static_cast<UINT>(rect.right - rect.left);
+        const UINT height = static_cast<UINT>(rect.bottom - rect.top);
+
+        DXGI_SWAP_CHAIN_DESC sd = {};
+        sd.BufferCount = 2;
+        sd.BufferDesc.Width = width;
+        sd.BufferDesc.Height = height;
+        sd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        sd.BufferDesc.RefreshRate.Numerator = 60;
+        sd.BufferDesc.RefreshRate.Denominator = 1;
+        sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        sd.OutputWindow = g_overlayHwnd;
+        sd.SampleDesc.Count = 1;
+        sd.Windowed = TRUE;
+        sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+        const D3D_FEATURE_LEVEL featureLevels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
+        D3D_FEATURE_LEVEL featureLevel;
+
+        HRESULT hr = D3D11CreateDeviceAndSwapChain(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+            0, featureLevels, 2, D3D11_SDK_VERSION,
+            &sd, &g_standaloneSwapChain, &g_standaloneDevice,
+            &featureLevel, &g_standaloneContext);
+
+        if (FAILED(hr))
+        {
+            OverlayLog("Failed to create standalone D3D11 device/swapchain");
+            return false;
+        }
+
+        ID3D11Texture2D* backbuffer = nullptr;
+        g_standaloneSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backbuffer));
+        if (backbuffer)
+        {
+            g_standaloneDevice->CreateRenderTargetView(backbuffer, nullptr, &g_standaloneRenderTarget);
+            backbuffer->Release();
+        }
+
+        g_backbufferWidth = width;
+        g_backbufferHeight = height;
+
+        OverlayLog("Standalone D3D11 device and swapchain created");
+        return true;
+    }
+
+    void UpdateOverlayPosition()
+    {
+        if (!g_targetHwnd || !g_overlayHwnd)
+            return;
+
+        RECT targetRect = {};
+        ::GetWindowRect(g_targetHwnd, &targetRect);
+        const int width = targetRect.right - targetRect.left;
+        const int height = targetRect.bottom - targetRect.top;
+
+        RECT overlayRect = {};
+        ::GetWindowRect(g_overlayHwnd, &overlayRect);
+
+        if (overlayRect.left != targetRect.left || overlayRect.top != targetRect.top ||
+            (overlayRect.right - overlayRect.left) != width || (overlayRect.bottom - overlayRect.top) != height)
+        {
+            ::SetWindowPos(g_overlayHwnd, HWND_TOPMOST,
+                targetRect.left, targetRect.top, width, height,
+                SWP_NOACTIVATE);
+        }
+
+        // Update click-through based on menu visibility
+        LONG_PTR exStyle = ::GetWindowLongPtrW(g_overlayHwnd, GWL_EXSTYLE);
+        if (g_menuVisible.load())
+        {
+            // Remove click-through when menu is visible
+            if (exStyle & WS_EX_TRANSPARENT)
+                ::SetWindowLongPtrW(g_overlayHwnd, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
+        }
+        else
+        {
+            // Add click-through when menu is hidden
+            if (!(exStyle & WS_EX_TRANSPARENT))
+                ::SetWindowLongPtrW(g_overlayHwnd, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT);
+        }
+    }
+
+    DWORD WINAPI StandaloneOverlayThread(void*)
+    {
+        OverlayLog("Standalone overlay thread started");
+        g_standaloneRunning.store(true);
+
+        // Wait for the game window
+        HWND targetHwnd = nullptr;
+        for (int i = 0; i < 120 && g_running.load(); ++i)
+        {
+            targetHwnd = FindGameWindow();
+            if (targetHwnd)
+                break;
+            ::Sleep(500);
+        }
+
+        if (!targetHwnd)
+        {
+            OverlayLog("Could not find game window for standalone overlay");
+            g_standaloneRunning.store(false);
+            return 1;
+        }
+
+        g_targetHwnd = targetHwnd;
+        g_hwnd = targetHwnd;
+
+        wchar_t title[256] = {};
+        ::GetWindowTextW(targetHwnd, title, 256);
+        std::wstring logMsg = L"Target game window found: ";
+        logMsg += title;
+        OverlayLogW(logMsg.c_str());
+
+        if (!CreateStandaloneOverlayWindow(targetHwnd))
+        {
+            g_standaloneRunning.store(false);
+            return 1;
+        }
+
+        if (!CreateStandaloneD3D11())
+        {
+            ::DestroyWindow(g_overlayHwnd);
+            g_overlayHwnd = nullptr;
+            g_standaloneRunning.store(false);
+            return 1;
+        }
+
+        // Initialize ImGui
+        EnsureImGuiContext();
+        ImGui_ImplWin32_Init(g_overlayHwnd);
+        g_win32Initialized = true;
+        ImGui_ImplDX11_Init(g_standaloneDevice, g_standaloneContext);
+        g_imguiRendererReady = true;
+
+        SetSelectedBackend(ActiveBackend::StandaloneD3D11);
+        SetStatus(L"Standalone D3D11 overlay active (Vulkan/D3D12 fallback)");
+        g_hooksInstalled.store(true);
+        OverlayLog("Standalone overlay fully initialized, entering render loop");
+
+        // Render loop
+        while (g_standaloneRunning.load() && g_running.load())
+        {
+            // Process messages
+            MSG msg;
+            while (::PeekMessageW(&msg, g_overlayHwnd, 0, 0, PM_REMOVE))
+            {
+                ::TranslateMessage(&msg);
+                ::DispatchMessageW(&msg);
+            }
+
+            // Check if game window is still alive
+            if (!::IsWindow(g_targetHwnd))
+            {
+                OverlayLog("Target game window closed, stopping overlay");
+                break;
+            }
+
+            // Update overlay position/size to match game window
+            UpdateOverlayPosition();
+
+            // Poll hotkey
+            PollHotkey();
+
+            // Begin frame
+            ImGui_ImplDX11_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::NewFrame();
+
+            // Draw
+            AegisUniversalOverlay_PollEngineProviders();
+            AegisUniversalOverlay_DrawEngineOverlay();
+            DrawCoreMenu();
+
+            // Render
+            ImGui::Render();
+            const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            g_standaloneContext->OMSetRenderTargets(1, &g_standaloneRenderTarget, nullptr);
+            g_standaloneContext->ClearRenderTargetView(g_standaloneRenderTarget, clearColor);
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+            g_standaloneSwapChain->Present(1, 0);
+            ++g_presentCount;
+        }
+
+        // Cleanup
+        OverlayLog("Shutting down standalone overlay");
+        ImGui_ImplDX11_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+        g_imguiRendererReady = false;
+        g_win32Initialized = false;
+        g_imguiContextReady = false;
+
+        if (g_standaloneRenderTarget) { g_standaloneRenderTarget->Release(); g_standaloneRenderTarget = nullptr; }
+        if (g_standaloneSwapChain) { g_standaloneSwapChain->Release(); g_standaloneSwapChain = nullptr; }
+        if (g_standaloneContext) { g_standaloneContext->Release(); g_standaloneContext = nullptr; }
+        if (g_standaloneDevice) { g_standaloneDevice->Release(); g_standaloneDevice = nullptr; }
+
+        if (g_overlayHwnd)
+        {
+            ::DestroyWindow(g_overlayHwnd);
+            g_overlayHwnd = nullptr;
+        }
+
+        g_standaloneRunning.store(false);
+        return 0;
+    }
+
+    bool TryInstallStandaloneOverlay()
+    {
+        OverlayLog("Attempting standalone D3D11 overlay (Vulkan/D3D12 fallback)...");
+        g_standaloneThread = ::CreateThread(nullptr, 0, StandaloneOverlayThread, nullptr, 0, nullptr);
+        if (!g_standaloneThread)
+        {
+            OverlayLog("Failed to create standalone overlay thread");
+            return false;
+        }
+        ::CloseHandle(g_standaloneThread);
+        g_standaloneThread = nullptr;
+        return true;
+    }
+
+    void UninstallHooks()
+    {
+        OverlayLog("Tearing down non-functional hooks...");
+        if (g_activeBackend == ActiveBackend::OpenGL && g_swapBuffersTarget)
+        {
+            MH_DisableHook(g_swapBuffersTarget);
+            g_swapBuffersTarget = nullptr;
+            g_originalSwapBuffers = nullptr;
+        }
+        else
+        {
+            kiero::shutdown();
+        }
+        g_originalD3D11Present = nullptr;
+        g_originalD3D11ResizeBuffers = nullptr;
+        g_originalD3D9EndScene = nullptr;
+        g_originalD3D9Reset = nullptr;
+        g_hooksInstalled.store(false);
+        g_imguiRendererReady = false;
+        g_win32Initialized = false;
+        if (g_imguiContextReady)
+        {
+            ImGui::DestroyContext();
+            g_imguiContextReady = false;
+        }
+        SetSelectedBackend(ActiveBackend::None);
+    }
+
+    bool VerifyHookIsAlive(const char* backendName, int timeoutMs = 3000)
+    {
+        char msg[256];
+        sprintf_s(msg, "%s hook installed - verifying it receives frames (waiting %dms)...", backendName, timeoutMs);
+        OverlayLog(msg);
+
+        const std::uint64_t countBefore = g_presentCount;
+        const int steps = timeoutMs / 100;
+        for (int i = 0; i < steps && g_running.load(); ++i)
+        {
+            ::Sleep(100);
+            if (g_presentCount > countBefore)
+            {
+                sprintf_s(msg, "%s hook is ALIVE - received %llu present calls", backendName,
+                    static_cast<unsigned long long>(g_presentCount - countBefore));
+                OverlayLog(msg);
+                return true;
+            }
+        }
+
+        sprintf_s(msg, "%s hook is DEAD - no Present calls received in %dms. Module loaded but not used for rendering.", backendName, timeoutMs);
+        OverlayLog(msg);
+        return false;
+    }
+
     DWORD WINAPI InstallThread(void*)
     {
+        OverlayLog("Overlay install thread started");
         RefreshDetectedBackends();
         g_running.store(true);
 
-        for (int attempt = 0; attempt < 180 && g_running.load(); ++attempt)
+        // Log detected modules
+        {
+            std::lock_guard lock(g_stateMutex);
+            std::wstring logDetected = L"Detected render modules: " + g_detectedBackends;
+            OverlayLogW(logDetected.c_str());
+        }
+
+        // Phase 1: Try to hook into actual rendering backends
+        for (int attempt = 0; attempt < 10 && g_running.load(); ++attempt)
         {
             RefreshDetectedBackends();
 
-            if (TryInstallD3D11() || TryInstallD3D9() || TryInstallOpenGL())
-                return 0;
+            if (TryInstallD3D11())
+            {
+                if (VerifyHookIsAlive("D3D11"))
+                    return 0;
+                UninstallHooks();
+            }
 
-            if (::GetModuleHandleW(L"d3d12.dll") || ::GetModuleHandleW(L"vulkan-1.dll"))
-                SetStatus(L"Vulkan/D3D12 detected; this build reports those backends but renders ImGui on D3D11, D3D9, or OpenGL");
-            else
-                SetStatus(L"waiting for D3D11, D3D9, or OpenGL runtime module");
+            if (TryInstallD3D9())
+            {
+                if (VerifyHookIsAlive("D3D9"))
+                    return 0;
+                UninstallHooks();
+            }
+
+            if (TryInstallOpenGL())
+            {
+                if (VerifyHookIsAlive("OpenGL"))
+                    return 0;
+                UninstallHooks();
+            }
 
             ::Sleep(500);
         }
 
-        if (!g_hooksInstalled.load())
-            SetStatus(L"no supported render bridge installed; detected modules: " + ModuleList());
+        // Phase 2: All hooks either failed to install or installed but received no frames.
+        // Fall back to standalone overlay.
+        OverlayLog("No working render hook found. Launching standalone D3D11 overlay...");
+        if (TryInstallStandaloneOverlay())
+        {
+            SetStatus(L"Standalone D3D11 overlay launched (auto-fallback)");
+            return 0;
+        }
+
+        SetStatus(L"FAILED: no supported render bridge installed; detected modules: " + ModuleList());
+        OverlayLog("FAILED: Could not install any overlay backend");
         return 0;
     }
 
@@ -652,6 +1099,10 @@ AEGIS_UNIVERSAL_API int AegisUniversalOverlay_Start()
 AEGIS_UNIVERSAL_API void AegisUniversalOverlay_Stop()
 {
     g_running.store(false);
+    g_standaloneRunning.store(false);
+
+    // Wait a moment for standalone thread to finish
+    ::Sleep(200);
 
     if (g_swapBuffersTarget)
         MH_DisableHook(g_swapBuffersTarget);
@@ -674,6 +1125,13 @@ AEGIS_UNIVERSAL_API void AegisUniversalOverlay_Stop()
         g_d3d9Device->Release();
         g_d3d9Device = nullptr;
     }
+
+    // Cleanup standalone overlay resources
+    if (g_standaloneRenderTarget) { g_standaloneRenderTarget->Release(); g_standaloneRenderTarget = nullptr; }
+    if (g_standaloneSwapChain) { g_standaloneSwapChain->Release(); g_standaloneSwapChain = nullptr; }
+    if (g_standaloneContext) { g_standaloneContext->Release(); g_standaloneContext = nullptr; }
+    if (g_standaloneDevice) { g_standaloneDevice->Release(); g_standaloneDevice = nullptr; }
+    if (g_overlayHwnd) { ::DestroyWindow(g_overlayHwnd); g_overlayHwnd = nullptr; }
 
     if (g_hwnd && g_originalWndProc)
         ::SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_originalWndProc));
@@ -727,14 +1185,14 @@ AEGIS_UNIVERSAL_API int AegisUniversalOverlay_GetInfo(AegisUniversalOverlayBridg
     outInfo->size = sizeof(AegisUniversalOverlayBridgeInfo);
     outInfo->running = g_running.load() ? 1 : 0;
     outInfo->hooksInstalled = g_hooksInstalled.load() ? 1 : 0;
-    outInfo->swapchainCaptured = (g_d3d11SwapChain || g_d3d9Device || g_activeBackend == ActiveBackend::OpenGL) ? 1 : 0;
-    outInfo->hwndFound = g_hwnd ? 1 : 0;
+    outInfo->swapchainCaptured = (g_d3d11SwapChain || g_d3d9Device || g_standaloneSwapChain || g_activeBackend == ActiveBackend::OpenGL) ? 1 : 0;
+    outInfo->hwndFound = (g_hwnd || g_overlayHwnd) ? 1 : 0;
     outInfo->imguiInitialized = (g_imguiContextReady && g_win32Initialized && g_imguiRendererReady) ? 1 : 0;
-    outInfo->renderTargetReady = (g_d3d11RenderTarget || g_activeBackend == ActiveBackend::D3D9 || g_activeBackend == ActiveBackend::OpenGL) ? 1 : 0;
+    outInfo->renderTargetReady = (g_d3d11RenderTarget || g_standaloneRenderTarget || g_activeBackend == ActiveBackend::D3D9 || g_activeBackend == ActiveBackend::OpenGL) ? 1 : 0;
     outInfo->menuVisible = g_menuVisible.load() ? 1 : 0;
     outInfo->presentCount = g_presentCount;
     outInfo->resizeCount = g_resizeCount;
-    outInfo->hwnd = g_hwnd;
+    outInfo->hwnd = g_hwnd ? g_hwnd : g_overlayHwnd;
     outInfo->backbufferWidth = g_backbufferWidth;
     outInfo->backbufferHeight = g_backbufferHeight;
     outInfo->backbufferFormat = g_backbufferFormat;

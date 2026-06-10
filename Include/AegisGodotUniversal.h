@@ -24,7 +24,8 @@ enum AegisGodotObjectFlags : std::uint32_t
     AegisGodotObject_Node2D = 1u << 0,
     AegisGodotObject_Node3D = 1u << 1,
     AegisGodotObject_PhysicsBody = 1u << 2,
-    AegisGodotObject_VisibleOnScreen = 1u << 3
+    AegisGodotObject_VisibleOnScreen = 1u << 3,
+    AegisGodotObject_LikelyTarget = 1u << 4
 };
 
 struct AegisGodotVec3
@@ -68,6 +69,15 @@ struct AegisGodotProjectedPoint
     float y;
     float depth;
     std::int32_t clipped;
+};
+
+struct AegisGodotMemberInfo
+{
+    char className[64];
+    char memberName[64];
+    char typeName[64];
+    std::uint32_t offset;
+    std::uint32_t isMethod;
 };
 
 struct AegisGodotAdapterTiming
@@ -129,3 +139,8 @@ AEGIS_UNIVERSAL_API int AegisGodot_ProjectWorldToScreen(const AegisGodotVec3* wo
 AEGIS_UNIVERSAL_API int AegisGodot_WriteSnapshotJson(const wchar_t* path);
 AEGIS_UNIVERSAL_API int AegisGodot_LoadSnapshotJson(const wchar_t* path);
 AEGIS_UNIVERSAL_API void AegisGodot_PrintCurrentObjects();
+AEGIS_UNIVERSAL_API int AegisGodot_ScanClasses();
+AEGIS_UNIVERSAL_API std::uint32_t AegisGodot_GetMemberCount();
+AEGIS_UNIVERSAL_API int AegisGodot_GetMemberInfo(std::uint32_t index, AegisGodotMemberInfo* outInfo);
+AEGIS_UNIVERSAL_API int AegisGodot_InitAutoProviders();
+AEGIS_UNIVERSAL_API int AegisGodot_WriteResolverReport(const wchar_t* path);

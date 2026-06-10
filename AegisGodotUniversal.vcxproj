@@ -44,6 +44,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Include\AegisGodotUniversal.h" />
+    <ClInclude Include="Source\GodotSceneBackend.h" />
     <ClInclude Include="Source\AegisEngineProfile.generated.h" />
     <ClInclude Include="Common\AegisUniversalRuntime\Include\AegisUniversalRuntime.h" />
     <ClInclude Include="Common\AegisUniversalRuntime\Source\AegisUniversalRuntimeInternal.h" />
@@ -51,6 +52,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\GodotAdapter.cpp" />
+    <ClCompile Include="Source\Godot3Backend.cpp" />
+    <ClCompile Include="Source\GodotResolverTrace.cpp" />
+    <ClCompile Include="Source\GodotSafeProbe.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalRuntime.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\AegisUniversalSdk.cpp" />
     <ClCompile Include="Common\AegisUniversalRuntime\Source\dllmain.cpp" />

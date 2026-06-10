@@ -10,6 +10,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <string>
+#include <vector>
+
+extern bool g_drawAllNode3Ds;
 
 namespace
 {
@@ -29,6 +34,7 @@ namespace
     bool g_drawLines = true;
     bool g_drawLabels = true;
     bool g_hideInvisible = true;
+    bool g_drawLikelyOnly = true;
     float g_boxThickness = 1.5f;
     float g_lineThickness = 1.25f;
     ImVec4 g_boxColor = ImVec4(0.55f, 0.85f, 1.0f, 1.0f);
@@ -40,8 +46,89 @@ namespace
         return { a.x + b.x, a.y + b.y, a.z + b.z };
     }
 
+    void Resolve2DCanvasScale(const AegisGodotObjectSnapshot& object, const ImVec2& display, float& scaleX, float& scaleY)
+    {
+        scaleX = 1.0f;
+        scaleY = 1.0f;
+        if (display.x <= 1.0f || display.y <= 1.0f ||
+            !std::isfinite(object.origin.x) || !std::isfinite(object.origin.y))
+        {
+            return;
+        }
+
+        struct CandidateCanvas
+        {
+            float width;
+            float height;
+        };
+
+        static constexpr CandidateCanvas candidates[] = {
+            { 1920.0f, 1080.0f },
+            { 1600.0f, 900.0f },
+            { 1366.0f, 768.0f },
+            { 1280.0f, 720.0f },
+            { 1024.0f, 576.0f }
+        };
+
+        const float displayAspect = display.x / display.y;
+        float bestScore = 1000.0f;
+        const CandidateCanvas* best = nullptr;
+        for (const CandidateCanvas& candidate : candidates)
+        {
+            if (display.x >= candidate.width - 1.0f && display.y >= candidate.height - 1.0f)
+                continue;
+            if (object.origin.x < -candidate.width * 0.25f || object.origin.x > candidate.width * 1.25f ||
+                object.origin.y < -candidate.height * 0.25f || object.origin.y > candidate.height * 1.25f)
+            {
+                continue;
+            }
+
+            const float aspectScore = std::abs(displayAspect - (candidate.width / candidate.height));
+            const float centerScore =
+                (std::abs(object.origin.x - (candidate.width * 0.5f)) / candidate.width) +
+                (std::abs(object.origin.y - (candidate.height * 0.5f)) / candidate.height);
+            const float score = aspectScore + centerScore;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                best = &candidate;
+            }
+        }
+
+        if (best && bestScore < 0.35f)
+        {
+            scaleX = display.x / best->width;
+            scaleY = display.y / best->height;
+        }
+    }
+
     bool ProjectBounds(const AegisGodotObjectSnapshot& object, Rect2D& rect, std::uint32_t& projected, std::uint32_t& clipped)
     {
+        if (object.flags & AegisGodotObject_Node2D)
+        {
+            // For 2D, origin is in Godot canvas coordinates. Stretch modes often keep that canvas
+            // at 1920x1080 while the OpenGL framebuffer/ImGui display is smaller.
+            const ImVec2 display = ImGui::GetIO().DisplaySize;
+            float canvasScaleX = 1.0f;
+            float canvasScaleY = 1.0f;
+            Resolve2DCanvasScale(object, display, canvasScaleX, canvasScaleY);
+
+            const float originX = object.origin.x * canvasScaleX;
+            const float originY = object.origin.y * canvasScaleY;
+            const float boundsScale = (canvasScaleX + canvasScaleY) * 0.5f;
+            float zoom = object.origin.z;
+            if (zoom < 0.01f) zoom = 1.0f;
+            zoom *= boundsScale;
+
+            rect.minX = originX + object.boundsMin.x * zoom;
+            rect.maxX = originX + object.boundsMax.x * zoom;
+            rect.minY = originY + object.boundsMin.y * zoom;
+            rect.maxY = originY + object.boundsMax.y * zoom;
+            rect.valid = true;
+            ++projected;
+            return true;
+        }
+
         const std::array<AegisGodotVec3, 8> corners = {
             Add(object.origin, { object.boundsMin.x, object.boundsMin.y, object.boundsMin.z }),
             Add(object.origin, { object.boundsMax.x, object.boundsMin.y, object.boundsMin.z }),
@@ -79,7 +166,28 @@ namespace
                 rect.maxY = std::max(rect.maxY, point.y);
             }
         }
-        return rect.valid && rect.maxX > rect.minX && rect.maxY > rect.minY;
+
+        if (rect.valid && rect.maxX > rect.minX && rect.maxY > rect.minY)
+            return true;
+
+        // Fallback: still draw at the detected object origin if bounds projection is clipped.
+        AegisGodotProjectedPoint originPoint = {};
+        if (!AegisGodot_ProjectWorldToScreen(&object.origin, &originPoint) || originPoint.clipped ||
+            !std::isfinite(originPoint.x) || !std::isfinite(originPoint.y))
+        {
+            ++clipped;
+            return false;
+        }
+
+        ++projected;
+        const float halfWidth = 10.0f;
+        const float halfHeight = 18.0f;
+        rect.minX = originPoint.x - halfWidth;
+        rect.maxX = originPoint.x + halfWidth;
+        rect.minY = originPoint.y - halfHeight;
+        rect.maxY = originPoint.y + halfHeight;
+        rect.valid = true;
+        return true;
     }
 
     void DrawCornerBox(ImDrawList* drawList, const Rect2D& rect, ImU32 color)
@@ -120,6 +228,8 @@ namespace
             if (!AegisGodot_GetObjectSnapshot(i, &object))
                 continue;
             if (g_hideInvisible && !object.visible)
+                continue;
+            if (g_drawLikelyOnly && (object.flags & AegisGodotObject_LikelyTarget) == 0)
                 continue;
 
             Rect2D rect = {};
@@ -175,6 +285,61 @@ namespace
             }
             ImGui::EndTable();
         }
+    }
+
+    struct LocalClass
+    {
+        std::string name;
+        std::vector<AegisGodotMemberInfo> members;
+    };
+    
+    std::vector<LocalClass> g_localClasses;
+    bool g_classDbScanned = false;
+    char g_classSearch[64] = {};
+    char g_memberSearch[64] = {};
+    int g_selectedClassIndex = -1;
+
+    bool ContainsAnsi(const char* haystack, const char* needle)
+    {
+        if (!haystack || !needle)
+            return false;
+        std::string h = haystack;
+        std::string n = needle;
+        std::transform(h.begin(), h.end(), h.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return h.find(n) != std::string::npos;
+    }
+
+    void UpdateLocalClassCache()
+    {
+        g_localClasses.clear();
+        std::uint32_t count = AegisGodot_GetMemberCount();
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            AegisGodotMemberInfo member = {};
+            if (!AegisGodot_GetMemberInfo(i, &member))
+                continue;
+                
+            auto it = std::find_if(g_localClasses.begin(), g_localClasses.end(), [&](const LocalClass& c) {
+                return c.name == member.className;
+            });
+            
+            if (it == g_localClasses.end())
+            {
+                LocalClass newClass;
+                newClass.name = member.className;
+                newClass.members.push_back(member);
+                g_localClasses.push_back(newClass);
+            }
+            else
+            {
+                it->members.push_back(member);
+            }
+        }
+        
+        std::sort(g_localClasses.begin(), g_localClasses.end(), [](const LocalClass& a, const LocalClass& b) {
+            return a.name < b.name;
+        });
     }
 }
 
@@ -234,6 +399,8 @@ extern "C" void AegisUniversalOverlay_DrawEngineMenu()
     {
         ImGui::Checkbox("Draw provider overlay", &g_drawEnabled);
         ImGui::Checkbox("Hide invisible objects", &g_hideInvisible);
+        ImGui::Checkbox("Draw likely player targets only", &g_drawLikelyOnly);
+        ImGui::Checkbox("Draw all SceneTree nodes (cluttered)", &g_drawAllNode3Ds);
         ImGui::Checkbox("Boxes", &g_drawBoxes);
         ImGui::Checkbox("Corner boxes", &g_drawCornerBoxes);
         ImGui::Checkbox("Filled boxes", &g_drawFilledBoxes);
@@ -253,6 +420,137 @@ extern "C" void AegisUniversalOverlay_DrawEngineMenu()
         if (ImGui::Button("Print current objects to console"))
             AegisGodot_PrintCurrentObjects();
         DrawObjectTable();
+        ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Inspector"))
+    {
+        if (ImGui::Button("Scan Godot ClassDB"))
+        {
+            AegisGodot_ScanClasses();
+            UpdateLocalClassCache();
+            g_classDbScanned = true;
+            g_selectedClassIndex = -1;
+        }
+        
+        ImGui::SameLine();
+        if (ImGui::Button("Export SDK Header") && g_classDbScanned && !g_localClasses.empty())
+        {
+            std::wofstream out(L"AegisGodotSDK_Generated.h", std::ios::trunc);
+            if (out)
+            {
+                out << L"#pragma once\n\n";
+                out << L"// Generated Godot SDK Header\n";
+                out << L"#include <cstdint>\n\n";
+                out << L"namespace GodotSDK\n{\n";
+                for (const auto& c : g_localClasses)
+                {
+                    out << L"    // Class: " << c.name.c_str() << L"\n";
+                    out << L"    namespace " << c.name.c_str() << L"\n    {\n";
+                    for (const auto& m : c.members)
+                    {
+                        if (m.isMethod)
+                        {
+                            out << L"        // Method: " << m.memberName << L"\n";
+                            out << L"        inline const char* Method_" << m.memberName << L"() { return \"" << m.memberName << L"\"; }\n";
+                        }
+                        else
+                        {
+                            out << L"        // Property: " << m.memberName << L" (" << m.typeName << L")\n";
+                            out << L"        inline const char* Property_" << m.memberName << L"() { return \"" << m.memberName << L"\"; }\n";
+                        }
+                    }
+                    out << L"    }\n\n";
+                }
+                out << L"}\n";
+            }
+        }
+        
+        ImGui::Separator();
+        
+        ImGui::Columns(2, "inspector-columns", true);
+        
+        ImGui::Text("Classes");
+        ImGui::InputText("Search Class", g_classSearch, sizeof(g_classSearch));
+        
+        std::vector<int> filteredClassIndices;
+        for (size_t i = 0; i < g_localClasses.size(); ++i)
+        {
+            if (g_classSearch[0] == '\0' || ContainsAnsi(g_localClasses[i].name.c_str(), g_classSearch))
+            {
+                filteredClassIndices.push_back(static_cast<int>(i));
+            }
+        }
+        
+        if (ImGui::BeginChild("classes-child", ImVec2(0, 300), true))
+        {
+            for (int idx : filteredClassIndices)
+            {
+                const bool isSelected = (g_selectedClassIndex == idx);
+                if (ImGui::Selectable(g_localClasses[idx].name.c_str(), isSelected))
+                {
+                    g_selectedClassIndex = idx;
+                }
+            }
+            ImGui::EndChild();
+        }
+        
+        ImGui::NextColumn();
+        
+        ImGui::Text("Properties & Methods");
+        ImGui::InputText("Search Member", g_memberSearch, sizeof(g_memberSearch));
+        
+        if (g_selectedClassIndex >= 0 && g_selectedClassIndex < static_cast<int>(g_localClasses.size()))
+        {
+            const auto& selectedClass = g_localClasses[g_selectedClassIndex];
+            std::vector<AegisGodotMemberInfo> filteredMembers;
+            for (const auto& m : selectedClass.members)
+            {
+                if (g_memberSearch[0] == '\0' || ContainsAnsi(m.memberName, g_memberSearch))
+                {
+                    filteredMembers.push_back(m);
+                }
+            }
+            
+            if (ImGui::BeginChild("members-child", ImVec2(0, 300), true))
+            {
+                if (ImGui::BeginTable("members-table", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
+                {
+                    ImGui::TableSetupColumn("Type");
+                    ImGui::TableSetupColumn("Name");
+                    ImGui::TableSetupColumn("Kind");
+                    ImGui::TableHeadersRow();
+                    
+                    for (const auto& m : filteredMembers)
+                    {
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::TextUnformatted(m.typeName);
+                        ImGui::TableNextColumn();
+                        
+                        if (ImGui::Selectable(m.memberName))
+                        {
+                            ImGui::SetClipboardText(m.memberName);
+                        }
+                        if (ImGui::IsItemHovered())
+                        {
+                            ImGui::SetTooltip("Click to copy name to clipboard");
+                        }
+                        
+                        ImGui::TableNextColumn();
+                        ImGui::TextUnformatted(m.isMethod ? "Method" : "Property");
+                    }
+                    ImGui::EndTable();
+                }
+                ImGui::EndChild();
+            }
+        }
+        else
+        {
+            ImGui::Text("Select a class to view its members.");
+        }
+        
+        ImGui::Columns(1);
         ImGui::EndTabItem();
     }
 }

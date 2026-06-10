@@ -54,6 +54,7 @@ struct AegisUniversalProfile
     const wchar_t* shortName;
     const wchar_t* reportFileName;
     const wchar_t* traceFileName;
+    const wchar_t* logFileName;
     const AegisUniversalSignature* signatures;
     std::size_t signatureCount;
 };
@@ -155,3 +156,7 @@ AEGIS_UNIVERSAL_API const char* AegisUniversal_GetBrandAsciiArt();
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetEngineName();
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetReportFileName();
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetTraceFileName();
+AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetLogFileName();
+AEGIS_UNIVERSAL_API void AegisUniversal_LogA(const char* message);
+AEGIS_UNIVERSAL_API void AegisUniversal_LogPrintfA(const char* format, ...);
+AEGIS_UNIVERSAL_API void AegisUniversal_LogW(const wchar_t* message);

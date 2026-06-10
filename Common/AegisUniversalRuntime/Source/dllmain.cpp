@@ -1,8 +1,10 @@
-﻿#include "AegisUniversalRuntime.h"
+#include "AegisUniversalRuntime.h"
 #include "AegisUniversalOverlay.h"
 
 #include <Windows.h>
 
+#include <cstdio>
+#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -49,22 +51,32 @@ namespace
 
     void WriteStatusLine(const std::wstring& value)
     {
-        ::OutputDebugStringW(value.c_str());
-        ::OutputDebugStringW(L"\n");
-
-        HANDLE output = ::GetStdHandle(STD_OUTPUT_HANDLE);
-        if (!output || output == INVALID_HANDLE_VALUE)
-            return;
-
-        DWORD written = 0;
-        ::WriteConsoleW(output, value.c_str(), static_cast<DWORD>(value.size()), &written, nullptr);
-        ::WriteConsoleW(output, L"\r\n", 2, &written, nullptr);
+        AegisUniversal_LogW(value.c_str());
     }
 
     DWORD WINAPI BootstrapThread(void*)
     {
-        if (!::GetConsoleWindow())
-            ::AllocConsole();
+        ::FreeConsole();
+        if (::AllocConsole())
+        {
+            FILE* fDummy = nullptr;
+            freopen_s(&fDummy, "CONOUT$", "w", stdout);
+            freopen_s(&fDummy, "CONOUT$", "w", stderr);
+            freopen_s(&fDummy, "CONIN$", "r", stdin);
+            std::ios::sync_with_stdio(true);
+            std::wcout.clear();
+            std::cout.clear();
+            std::wcerr.clear();
+            std::cerr.clear();
+            std::wcin.clear();
+            std::cin.clear();
+            HWND consoleWindow = ::GetConsoleWindow();
+            if (consoleWindow)
+            {
+                ::ShowWindow(consoleWindow, SW_SHOW);
+                ::SetForegroundWindow(consoleWindow);
+            }
+        }
 
         ::SetConsoleTitleW(L"Aegis Universal Engine Status");
         WriteStatusLine(WidenAscii(AegisUniversal_GetBrandAsciiArt()));
@@ -156,6 +168,8 @@ namespace
         }
 
         WriteStatusLine(L"[AegisUniversal] Trace: " + TempFilePath(AegisUniversal_GetTraceFileName()));
+        WriteStatusLine(L"[AegisUniversal] Log: " + TempFilePath(AegisUniversal_GetLogFileName()));
+        WriteStatusLine(L"[AegisUniversal] Resolver: " + ProfileSiblingPath(L"_Resolver.json"));
         return 0;
     }
 }

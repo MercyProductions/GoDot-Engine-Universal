@@ -3,10 +3,6 @@
 #include "AegisUniversalRuntime.h"
 
 inline constexpr AegisUniversalSignature kAegisUniversalSignatures[] = {
-    { L"Chambers The Outlaw.exe", nullptr, nullptr, AegisUniversalSignature_Process | AegisUniversalSignature_Core, "Dumpbin target: monolithic x64 Godot executable with embedded pck section" },
-    { L"Chambers The Outlaw.console.exe", nullptr, nullptr, AegisUniversalSignature_Process | AegisUniversalSignature_Core, "Dumpbin target: Godot console companion executable" },
-    { L"kerker.exe", nullptr, nullptr, AegisUniversalSignature_Process | AegisUniversalSignature_Core, "Dumpbin target: monolithic x64 Godot executable with embedded pck section" },
-    { L"SpaceIdle.exe", nullptr, nullptr, AegisUniversalSignature_Process | AegisUniversalSignature_Core, "Dumpbin target: godot.windows.template_release.x86_64.exe export section and embedded pck section" },
     { L"godot", nullptr, nullptr, AegisUniversalSignature_Process | AegisUniversalSignature_Core, "Process hint" },
     { L"godot.windows", nullptr, nullptr, AegisUniversalSignature_Process | AegisUniversalSignature_Core, "Process hint" },
     { L"godot_console", nullptr, nullptr, AegisUniversalSignature_Process | AegisUniversalSignature_Core, "Process hint" },
@@ -32,6 +28,7 @@ inline constexpr AegisUniversalProfile kAegisUniversalProfile = {
     L"Godot",
     L"Godot_Universal_Report.txt",
     L"Godot_Universal_Trace.txt",
+    L"Godot_Universal_Log.txt",
     kAegisUniversalSignatures,
     sizeof(kAegisUniversalSignatures) / sizeof(kAegisUniversalSignatures[0])
 };

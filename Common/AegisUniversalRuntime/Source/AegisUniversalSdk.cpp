@@ -208,6 +208,20 @@ namespace
         if (EqualsInsensitive(module.path, runtime.processPath))
             return true;
 
+        try
+        {
+            const std::filesystem::path moduleDir = std::filesystem::path(module.path).parent_path();
+            const std::filesystem::path processDir = std::filesystem::path(runtime.processPath).parent_path();
+            if (!moduleDir.empty() && !processDir.empty() &&
+                EqualsInsensitive(moduleDir.wstring(), processDir.wstring()))
+            {
+                return true;
+            }
+        }
+        catch (...)
+        {
+        }
+
         const AegisUniversalProfile& profile = AegisUniversal_GetProfile();
         if (profile.shortName && profile.shortName[0] && ContainsInsensitive(module.name, profile.shortName))
             return true;

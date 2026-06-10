@@ -4,6 +4,39 @@ Aegis universal runtime project for **Godot**. This follows the same diagnostic-
 
 It does not add game-specific memory scanners, node offset scraping, anti-cheat bypasses, stealth behavior, or hidden injection behavior.
 
+## Godot Compatibility Matrix
+
+The DLL detects the runtime profile and switches backends automatically:
+
+| Backend | Detection | Resolver |
+|---------|-----------|----------|
+| **Godot 4** | `template_release` / `template_debug`, GDExtension strings, or embedded PCK | GDExtension `get_proc_address` or shim over `get_interface_function` |
+| **Godot 3** | `godot.windows.opt.64` export name, or `godot_nativescript` + `SceneTree` without GDExtension strings | GDNative core API struct scan + `method_bind_ptrcall` |
+| **Blocked** | 32-bit PE (x86), unrecognized layout, Godot 1/2 | — |
+
+Godot 4 resolver strategies (in order):
+
+1. Native `get_proc_address` (jmp thunks / module pointers)
+2. Standard shim via `string_name_new_with_utf8_chars`
+3. Stripped-export shim via `string_new_with_utf8_chars` + `variant_get_ptr_constructor`
+
+| Game | Arch | Backend | Auto-scan |
+|------|------|---------|-----------|
+| Magic Archery | x64 | Godot 4 | supported |
+| Unnamed Space Idle | x64 | Godot 4 | supported |
+| Wheelchair Wizards | x64 | Godot 4 | supported |
+| Psychopomp | x64 | Godot 4 | supported |
+| Pathogenic Demo | x64 | Godot 4 | supported |
+| Lost Lives | x64 | Godot 4 | supported |
+| DOGWALK | x64 | Godot 4 | supported |
+| Kerker | x64 | Godot 4 (stripped) | supported |
+| Chambers The Outlaw | x64 | Godot 4 | supported |
+| Cave Crawler | x64 | Godot 3 | supported |
+| 20 Small Mazes | x64 | Godot 3 | supported |
+| Purrgatory | x86 | — | blocked (x64 DLL only) |
+
+The F4 Adapter tab reports `profile Godot4/x64, backend Godot 4 GDExtension` (or Godot 3 GDNative).
+
 ## Dumpbin Findings
 
 The profile was refreshed from these local targets:
@@ -12,6 +45,10 @@ The profile was refreshed from these local targets:
 C:\Program Files (x86)\Steam\steamapps\common\Unnamed Space Idle
 C:\Program Files (x86)\Steam\steamapps\common\Chambers The Outlaw
 C:\Program Files (x86)\Steam\steamapps\common\Kerker
+C:\Program Files (x86)\Steam\steamapps\common\Magic Archery
+C:\Program Files (x86)\Steam\steamapps\common\Cave Crawler
+C:\Program Files (x86)\Steam\steamapps\common\20 Small Mazes
+C:\Program Files (x86)\Steam\steamapps\common\Wheelchair Wizards
 ```
 
 Confirmed signals:
@@ -39,6 +76,11 @@ Chambers The Outlaw\godotsteam.debug.x86_64.dll
 
 Chambers The Outlaw\libterrain.windows.debug.x86_64.dll
   Export: terrain_3d_init
+
+Wheelchair Wizards\Wizards.exe
+  Export section name: godot.windows.template_release.x86_64.exe
+  Exports: AmdPowerXpressRequestHighPerformance, NoHotPatch, NvOptimusEnablement
+  Sections: pck
 ```
 
 ## Runtime Flow

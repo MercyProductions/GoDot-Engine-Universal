@@ -4,6 +4,8 @@
 #include <TlHelp32.h>
 
 #include <algorithm>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -174,6 +176,149 @@ namespace
               << L"] " << message << L"\n";
     }
 
+    std::mutex g_logMutex;
+    bool g_logSessionStarted = false;
+
+    std::string WideToUtf8(const wchar_t* value)
+    {
+        if (!value || !*value)
+            return std::string();
+
+        const int required = ::WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+        if (required <= 1)
+            return std::string();
+
+        std::string result(static_cast<std::size_t>(required - 1), '\0');
+        ::WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), required, nullptr, nullptr);
+        return result;
+    }
+
+    void WriteLogSessionHeaderLocked()
+    {
+        if (g_logSessionStarted)
+            return;
+
+        g_logSessionStarted = true;
+
+        wchar_t processPath[MAX_PATH] = {};
+        ::GetModuleFileNameW(nullptr, processPath, MAX_PATH);
+
+        std::ostringstream header;
+        header << "=== Aegis Universal log session start ===\r\n"
+               << "PID=" << ::GetCurrentProcessId()
+               << " TID=" << ::GetCurrentThreadId()
+               << " EXE=" << WideToUtf8(processPath)
+               << " ENGINE=" << WideToUtf8(AegisUniversal_GetProfile().engineName)
+               << " ===\r\n";
+
+        const std::string text = header.str();
+        const std::wstring path = TempFilePath(AegisUniversal_GetProfile().logFileName);
+        const HANDLE file = ::CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return;
+
+        DWORD written = 0;
+        ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+        ::FlushFileBuffers(file);
+        ::CloseHandle(file);
+    }
+
+    void AppendLogBytesLocked(const char* text, std::size_t length)
+    {
+        if (!text || length == 0)
+            return;
+
+        WriteLogSessionHeaderLocked();
+
+        SYSTEMTIME time = {};
+        ::GetLocalTime(&time);
+
+        char prefix[64] = {};
+        const int prefixLength = std::snprintf(prefix, sizeof(prefix), "[%04u-%02u-%02u %02u:%02u:%02u.%03u] ",
+            static_cast<unsigned>(time.wYear),
+            static_cast<unsigned>(time.wMonth),
+            static_cast<unsigned>(time.wDay),
+            static_cast<unsigned>(time.wHour),
+            static_cast<unsigned>(time.wMinute),
+            static_cast<unsigned>(time.wSecond),
+            static_cast<unsigned>(time.wMilliseconds));
+        if (prefixLength <= 0)
+            return;
+
+        const std::wstring path = TempFilePath(AegisUniversal_GetProfile().logFileName);
+        const HANDLE file = ::CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return;
+
+        DWORD written = 0;
+        ::WriteFile(file, prefix, static_cast<DWORD>(prefixLength), &written, nullptr);
+        ::WriteFile(file, text, static_cast<DWORD>(length), &written, nullptr);
+        ::WriteFile(file, "\r\n", 2, &written, nullptr);
+        ::FlushFileBuffers(file);
+        ::CloseHandle(file);
+    }
+
+    void MirrorLogToConsoleAndDebugger(const char* text, std::size_t length)
+    {
+        if (!text || length == 0)
+            return;
+
+        HANDLE output = ::GetStdHandle(STD_OUTPUT_HANDLE);
+        if (output && output != INVALID_HANDLE_VALUE)
+        {
+            DWORD written = 0;
+            ::WriteConsoleA(output, text, static_cast<DWORD>(length), &written, nullptr);
+        }
+
+        std::string dbg(text, length);
+        if (dbg.empty() || dbg.back() != '\n')
+            dbg.push_back('\n');
+        ::OutputDebugStringA(dbg.c_str());
+    }
+
+    void AppendLogLineA(const char* text, std::size_t length)
+    {
+        std::lock_guard<std::mutex> lock(g_logMutex);
+        AppendLogBytesLocked(text, length);
+        MirrorLogToConsoleAndDebugger(text, length);
+    }
+
+    void AppendLogLineW(const wchar_t* text)
+    {
+        if (!text)
+            return;
+
+        const std::string utf8 = WideToUtf8(text);
+        AppendLogLineA(utf8.c_str(), utf8.size());
+    }
+
+    bool MainModuleHasEmbeddedPckSection()
+    {
+        const auto* base = reinterpret_cast<const std::uint8_t*>(::GetModuleHandleW(nullptr));
+        if (!base)
+            return false;
+
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+            return false;
+
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE)
+            return false;
+
+        const auto* section = IMAGE_FIRST_SECTION(nt);
+        for (WORD index = 0; index < nt->FileHeader.NumberOfSections; ++index, ++section)
+        {
+            char name[9] = {};
+            std::memcpy(name, section->Name, 8);
+            if (_stricmp(name, "pck") == 0)
+                return true;
+        }
+        return false;
+    }
+
     std::vector<ModuleRecord> EnumerateModules()
     {
         std::vector<ModuleRecord> modules;
@@ -271,6 +416,13 @@ namespace
                     }
                 }
             }
+        }
+
+        if (profile.engineName &&
+            std::wcscmp(profile.engineName, L"Godot") == 0 &&
+            MainModuleHasEmbeddedPckSection())
+        {
+            g_runtimeFlags |= AegisUniversalRuntime_ProcessHintMatched;
         }
 
         if ((g_runtimeFlags & (AegisUniversalRuntime_ProcessHintMatched | AegisUniversalRuntime_ModuleHintMatched | AegisUniversalRuntime_ExportHintMatched)) != 0)
@@ -526,4 +678,46 @@ AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetReportFileName()
 AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetTraceFileName()
 {
     return AegisUniversal_GetProfile().traceFileName;
+}
+
+AEGIS_UNIVERSAL_API const wchar_t* AegisUniversal_GetLogFileName()
+{
+    return AegisUniversal_GetProfile().logFileName;
+}
+
+AEGIS_UNIVERSAL_API void AegisUniversal_LogA(const char* message)
+{
+    if (!message)
+        return;
+
+    std::size_t length = std::strlen(message);
+    while (length > 0 && (message[length - 1] == '\n' || message[length - 1] == '\r'))
+        --length;
+    AppendLogLineA(message, length);
+}
+
+AEGIS_UNIVERSAL_API void AegisUniversal_LogPrintfA(const char* format, ...)
+{
+    if (!format)
+        return;
+
+    char buffer[2048];
+    va_list args;
+    va_start(args, format);
+    const int written = std::vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    if (written <= 0)
+        return;
+
+    const std::size_t length = static_cast<std::size_t>(written < static_cast<int>(sizeof(buffer))
+        ? written
+        : sizeof(buffer) - 1);
+    AppendLogLineA(buffer, length);
+}
+
+AEGIS_UNIVERSAL_API void AegisUniversal_LogW(const wchar_t* message)
+{
+    if (!message)
+        return;
+    AppendLogLineW(message);
 }
